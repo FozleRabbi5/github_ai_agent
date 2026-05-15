@@ -1,12 +1,22 @@
+"""Service for cloning and updating GitHub repositories."""
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from django.conf import settings
 from git import Repo
 
-from app.schemas.dto import ClonedRepository
+
+@dataclass(slots=True)
+class ClonedRepository:
+    repository_url: str
+    repository_name: str
+    local_path: str
+    default_branch: str
+    commit_hash: str
+    was_cloned: bool
 
 
 class GitHubRepositoryService:
@@ -17,13 +27,13 @@ class GitHubRepositoryService:
     def clone_or_update(self, repository_url: str) -> ClonedRepository:
         repository_name = self._extract_repository_name(repository_url)
         local_path = self._base_dir / repository_name
-        was_cloned = False
 
         if not local_path.exists():
             repo = Repo.clone_from(repository_url, local_path)
             was_cloned = True
         else:
             repo = Repo(local_path)
+            was_cloned = False
 
         branch = self._safe_branch_name(repo)
         commit_hash = repo.head.commit.hexsha
