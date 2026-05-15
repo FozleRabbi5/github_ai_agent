@@ -1,0 +1,19 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+chroma_db/
+*.sqlite3
+*.bin
+# Virtual environments
+.venv
+
+# Environment variables
+.env
+
+
+.codex
+.agents

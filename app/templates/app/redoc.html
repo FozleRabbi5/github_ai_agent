@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ title }}</title>
+    <style>
+        body { margin: 0; background: #ffffff; }
+        .notice {
+            margin: 16px;
+            padding: 12px 16px;
+            border-radius: 10px;
+            background: #fff3cd;
+            color: #664d03;
+            font-family: sans-serif;
+        }
+    </style>
+</head>
+<body>
+    {% if missing_dependencies %}
+    <div class="notice">
+        OpenAPI helpers are not installed yet. Add {{ required_packages }} to the environment, then reload this page.
+    </div>
+    {% endif %}
+    <redoc spec-url="{{ schema_url }}"></redoc>
+    <script src="https://cdn.redoc.ly/redoc/latest/bundles/redoc.standalone.js"></script>
+</body>
+</html>
