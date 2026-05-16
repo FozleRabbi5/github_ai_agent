@@ -9,9 +9,8 @@ from app.models import Finding, Repository, ResearchSession, ToolCall
 
 
 class StartSessionRequestSerializer(serializers.Serializer):
-    repo_url = serializers.URLField(help_text="GitHub repository URL to research")
     question = serializers.CharField(
-        help_text="The research question to investigate",
+        help_text="The research question to investigate (must include the GitHub repository URL)",
         allow_blank=False,
         trim_whitespace=True,
     )
