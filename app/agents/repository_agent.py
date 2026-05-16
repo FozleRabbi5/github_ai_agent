@@ -124,9 +124,12 @@ class ResearchAgent:
         # Context window management
         # We prune older tool calls and responses to save context, while keeping the system prompt and original question
         if len(messages) > 20:
-            # Drop messages index 2 to 4 (keeping 0=system, 1=user question)
-            # This is a naive truncation; LangGraph trim_messages is more robust, but this works for basic sliding window
-            messages = [messages[0], messages[1]] + messages[-16:]
+            head = messages[:2]
+            tail = messages[-16:]
+            # Ensure tail does not start with a ToolMessage, as its corresponding AIMessage would be lost
+            while tail and getattr(tail[0], "type", "") == "tool":
+                tail.pop(0)
+            messages = head + tail
 
         total_tokens = sum(
             msg.usage_metadata.get("total_tokens", 0)
