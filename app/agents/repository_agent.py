@@ -123,13 +123,22 @@ class ResearchAgent:
 
         # Context window management
         # We prune older tool calls and responses to save context, while keeping the system prompt and original question
+        from langchain_core.messages import ToolMessage
         if len(messages) > 20:
             head = messages[:2]
             tail = messages[-16:]
             # Ensure tail does not start with a ToolMessage, as its corresponding AIMessage would be lost
-            while tail and getattr(tail[0], "type", "") == "tool":
+            while tail and isinstance(tail[0], ToolMessage):
                 tail.pop(0)
             messages = head + tail
+            
+        # Debug logging to see exactly what we are sending
+        debug_msg_types = []
+        for i, m in enumerate(messages):
+            role = getattr(m, "type", type(m).__name__)
+            has_tool_calls = bool(getattr(m, "tool_calls", None))
+            debug_msg_types.append(f"[{i}]:{role}(has_tool_calls={has_tool_calls})")
+        logger.info(f"LLM INVOKE MESSAGES: {', '.join(debug_msg_types)}")
 
         total_tokens = sum(
             msg.usage_metadata.get("total_tokens", 0)
