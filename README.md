@@ -53,14 +53,40 @@ Repository ──< ResearchSession ──< ToolCall
 
 ### Installation
 
+You can install the project dependencies using either `pip` or `uv` (a much faster Python package installer).
+
+#### Option A: Using pip
+
 ```bash
 # Create and activate virtualenv
 python -m venv .venv
 source .venv/bin/activate
 
 # Install dependencies
-pip install -e .
+pip install -r requirements.txt
+# Alternatively, to install as an editable package: pip install -e .
+```
 
+#### Option B: Using uv (Recommended for speed)
+
+```bash
+# Install uv if you don't have it
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create and activate a virtual environment
+uv venv
+source .venv/bin/activate
+
+# Install dependencies
+uv pip install -r requirements.txt
+# Alternatively, to install as an editable package: uv pip install -e .
+```
+
+#### Common Setup Steps
+
+After installing dependencies using either method above, proceed with the following setup:
+
+```bash
 # Configure environment
 cp .env.example .env
 # Edit .env and set your OPENAI_API_KEY
