@@ -8,16 +8,17 @@ routes dynamically based on LLM outputs.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, TypedDict
+from typing import Annotated, Any, TypedDict, Literal
 
 from django.conf import settings
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, RemoveMessage
 from langchain_openai import ChatOpenAI
+from pydantic import BaseModel, Field
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 
-from app.agents.tools import build_tools
+from app.agents.tools import AGENT_TOOLS
 from app.models import ResearchSession
 from app.prompts.coding_assistant import SYSTEM_PROMPT, build_research_prompt
 
@@ -29,6 +30,13 @@ logger = logging.getLogger(__name__)
 MAX_ITERATIONS = 15        # Hard cap on tool-call rounds
 MAX_TOTAL_TOKENS = 100_000  # Abort if cumulative tokens exceed this
 
+# ---------------------------------------------------------------------------
+# Schemas
+# ---------------------------------------------------------------------------
+class FinalAnswer(BaseModel):
+    """The final comprehensive answer to the user's research question."""
+    answer: str = Field(description="The detailed, evidence-backed answer.")
+    source_references: list[str] = Field(description="List of file paths explicitly used to derive the answer.")
 
 # ---------------------------------------------------------------------------
 # State Definition
@@ -36,7 +44,7 @@ MAX_TOTAL_TOKENS = 100_000  # Abort if cumulative tokens exceed this
 class AgentState(TypedDict):
     messages: Annotated[list, add_messages]
     iteration: int
-
+    final_answer: dict[str, Any] | None
 
 # ---------------------------------------------------------------------------
 # Agent Class
@@ -55,10 +63,9 @@ class ResearchAgent:
         self.repo_local_path = repo_local_path
         self.repo_url = repo_url
         self.session = session
-        self.step_counter: list[int] = [0]  # mutable counter shared with tools
-
-        # Build tools (now wrapped with @tool)
-        self.tools = build_tools(repo_local_path, repo_url, session, self.step_counter)
+        
+        # Tools are now imported directly as module-level functions
+        self.tools = AGENT_TOOLS
 
         api_key = settings.OPENAI_API_KEY
         if not api_key:
@@ -69,7 +76,10 @@ class ResearchAgent:
             api_key=api_key,
             temperature=0,
         )
-        self.llm_with_tools = self.llm.bind_tools(self.tools)
+        
+        # We bind the final answer tool alongside regular tools.
+        # This allows the LLM to signal it has finished by calling FinalAnswer.
+        self.llm_with_tools = self.llm.bind_tools(self.tools + [FinalAnswer])
 
         # Build Graph
         workflow = StateGraph(AgentState)
@@ -80,10 +90,26 @@ class ResearchAgent:
         
         # Add Edges
         workflow.add_edge(START, "agent")
-        workflow.add_conditional_edges("agent", tools_condition)
+        workflow.add_conditional_edges("agent", self.should_continue, ["tools", END])
         workflow.add_edge("tools", "agent")
         
         self.graph = workflow.compile()
+
+    def should_continue(self, state: AgentState) -> Literal["tools", END]:
+        """Determine whether to continue routing to tools or end."""
+        messages = state.get("messages", [])
+        last_message = messages[-1]
+
+        # If there are no tool calls, or if the LLM called the FinalAnswer "tool", we're done.
+        if not getattr(last_message, "tool_calls", None):
+            return END
+            
+        # Check if the tool call is our special FinalAnswer schema
+        for tool_call in last_message.tool_calls:
+            if tool_call["name"] == "FinalAnswer":
+                return END
+                
+        return "tools"
 
     def call_model(self, state: AgentState) -> dict[str, Any]:
         """Node function to invoke the LLM with the current state."""
@@ -95,14 +121,16 @@ class ResearchAgent:
             iteration, MAX_ITERATIONS, self.session.session_id,
         )
 
-        # Context window management: keep SystemMessage, first HumanMessage, and last 30 messages
-        if len(messages) > 32:
-            messages = [messages[0], messages[1]] + messages[-30:]
+        # Context window management
+        # We prune older tool calls and responses to save context, while keeping the system prompt and original question
+        if len(messages) > 20:
+            # Drop messages index 2 to 4 (keeping 0=system, 1=user question)
+            # This is a naive truncation; LangGraph trim_messages is more robust, but this works for basic sliding window
+            messages = [messages[0], messages[1]] + messages[-16:]
 
-        # Token budget management
         total_tokens = sum(
             msg.usage_metadata.get("total_tokens", 0)
-            for msg in state["messages"]
+            for msg in messages
             if hasattr(msg, "usage_metadata") and msg.usage_metadata
         )
 
@@ -115,13 +143,28 @@ class ResearchAgent:
                 content=f"You've reached the {reason} limit. Please provide your final answer now based on what you've found so far."
             )
             messages.append(prompt)
-            # Invoke LLM without tools to force text response
-            response = self.llm.invoke(messages)
-            return {"messages": [prompt, response], "iteration": iteration}
+            # Invoke LLM specifically bound to only FinalAnswer to force structured output
+            response = self.llm.with_structured_output(FinalAnswer).invoke(messages)
+            
+            return {
+                "messages": [prompt, AIMessage(content="Final answer generated due to limit.")],
+                "iteration": iteration,
+                "final_answer": response.model_dump() if hasattr(response, "model_dump") else response
+            }
 
         # Normal execution
         response = self.llm_with_tools.invoke(messages)
-        return {"messages": [response], "iteration": iteration}
+        
+        state_updates = {"messages": [response], "iteration": iteration}
+        
+        # Check if the response was the FinalAnswer tool call
+        if hasattr(response, "tool_calls") and response.tool_calls:
+            for tc in response.tool_calls:
+                if tc["name"] == "FinalAnswer":
+                    state_updates["final_answer"] = tc["args"]
+                    break
+                    
+        return state_updates
 
     def run(self, question: str) -> dict[str, Any]:
         """
@@ -136,14 +179,30 @@ class ResearchAgent:
                 HumanMessage(content=build_research_prompt(question, self.repo_url))
             ],
             "iteration": 0,
+            "final_answer": None,
         }
 
-        # Run the graph
-        final_state = self.graph.invoke(initial_state, {"recursion_limit": MAX_ITERATIONS * 2 + 5})
+        # Run the graph, injecting config with the repo path and session ID so tools can use them
+        config = {
+            "recursion_limit": MAX_ITERATIONS * 2 + 5,
+            "configurable": {
+                "repo_local_path": self.repo_local_path,
+                "session_id": self.session.pk,
+            }
+        }
         
-        # Extract the final answer from the last message
-        last_message = final_state["messages"][-1]
-        final_answer = last_message.content if isinstance(last_message, AIMessage) else "Unable to produce an answer."
+        final_state = self.graph.invoke(initial_state, config)
+        
+        final_answer_data = final_state.get("final_answer")
+        
+        # If the LLM didn't use the structured tool and just output text (fallback)
+        if not final_answer_data:
+            last_message = final_state["messages"][-1]
+            content = last_message.content if isinstance(last_message, AIMessage) else "Unable to produce an answer."
+            final_answer_data = {
+                "answer": content,
+                "source_references": []
+            }
 
         # Calculate token usage
         total_prompt = 0
@@ -154,9 +213,9 @@ class ResearchAgent:
                 total_completion += msg.usage_metadata.get("output_tokens", 0)
 
         return {
-            "answer": final_answer,
+            "answer": final_answer_data.get("answer", "No answer provided."),
             "prompt_tokens": total_prompt,
             "completion_tokens": total_completion,
             "total_tokens": total_prompt + total_completion,
-            "source_references": [],
+            "source_references": final_answer_data.get("source_references", []),
         }

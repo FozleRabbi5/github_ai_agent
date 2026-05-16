@@ -24,10 +24,10 @@ class ResearchService:
     # ------------------------------------------------------------------
 
     def run_session(self, *, repo_url: str, question: str) -> ResearchSession:
-        """Clone/update a repo and run the research agent against it."""
-        start = time.perf_counter()
-
-        # 1. Clone or update the repository
+        """Clone/update a repo and start the research agent in the background."""
+        
+        # 1. Clone or update the repository (fast enough to be synchronous for metadata)
+        # We might want to do this in the background too, but for now we'll do it to get the repo name immediately
         cloned = self.git_service.clone_or_update(repo_url)
 
         # 2. Upsert the Repository record
@@ -50,12 +50,28 @@ class ResearchService:
             status=ResearchSession.Status.RUNNING,
         )
 
-        # 4. Run the agent
+        # 4. Run the agent in a background thread
+        import threading
+        thread = threading.Thread(
+            target=self._run_agent_background,
+            args=(repo_url, str(cloned.local_path), session.id, question)
+        )
+        thread.start()
+
+        return session
+
+    def _run_agent_background(self, repo_url: str, local_path: str, session_id: int, question: str) -> None:
+        """The background worker that executes the LangGraph agent."""
+        start = time.perf_counter()
+        
+        # We need to re-fetch the session inside the thread
+        session = ResearchSession.objects.get(pk=session_id)
+        
         try:
             from app.agents.repository_agent import ResearchAgent
 
             agent = ResearchAgent(
-                repo_local_path=cloned.local_path,
+                repo_local_path=local_path,
                 repo_url=repo_url,
                 session=session,
             )
@@ -63,7 +79,7 @@ class ResearchService:
 
             # 5. Finalise session
             duration = time.perf_counter() - start
-            session.answer = result["answer"]
+            session.answer = result.get("answer", "No answer provided.")
             session.source_references = result.get("source_references", [])
             session.prompt_tokens = result.get("prompt_tokens", 0)
             session.completion_tokens = result.get("completion_tokens", 0)
@@ -82,13 +98,6 @@ class ResearchService:
             session.duration_seconds = round(time.perf_counter() - start, 2)
             session.completed_at = timezone.now()
             session.save()
-
-        # Reload with relations for serialization
-        return (
-            ResearchSession.objects.select_related("repository")
-            .prefetch_related("tool_calls", "findings")
-            .get(pk=session.pk)
-        )
 
     def get_session(self, session_id: str) -> ResearchSession | None:
         try:
