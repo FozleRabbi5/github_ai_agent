@@ -71,15 +71,36 @@ pip install -r requirements.txt
 
 ```bash
 # Install uv if you don't have it
+Linux / macOS
 curl -LsSf https://astral.sh/uv/install.sh | sh
+Windows
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+Or install using pip:
+
+pip install uv
+
+# Clone the Repository
+git clone <your-repository-url>
+cd <project-folder>
+
+Example:
+
+git clone https://github.com/your-username/your-project.git
+cd your-project
 
 # Create and activate a virtual environment
 uv venv
+
+# Activate Virtual Environment
+Linux / macOS
 source .venv/bin/activate
+Windows
+.venv\Scripts\activate
 
 # Install dependencies
-uv pip install -r requirements.txt
-# Alternatively, to install as an editable package: uv pip install -e .
+uv sync
+
 ```
 
 #### Common Setup Steps
