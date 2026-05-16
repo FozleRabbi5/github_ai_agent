@@ -316,29 +316,24 @@ class AgentLoopTests(TestCase):
             status=ResearchSession.Status.RUNNING,
         )
 
-    @patch("app.agents.repository_agent.OpenAI")
-    def test_agent_stops_on_no_tool_calls(self, mock_openai_cls):
+    @patch("app.agents.repository_agent.ChatOpenAI")
+    def test_agent_stops_on_no_tool_calls(self, mock_chat_openai_cls):
         """Agent should return when LLM produces a response with no tool calls."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
+        mock_llm = MagicMock()
+        mock_llm_with_tools = MagicMock()
+        
+        mock_chat_openai_cls.return_value = mock_llm
+        mock_llm.bind_tools.return_value = mock_llm_with_tools
 
+        from langchain_core.messages import AIMessage
+        
         # Mock a response with no tool calls (final answer)
-        mock_message = MagicMock()
-        mock_message.tool_calls = None
-        mock_message.content = "The answer is 42."
-
-        mock_choice = MagicMock()
-        mock_choice.message = mock_message
-
-        mock_usage = MagicMock()
-        mock_usage.prompt_tokens = 100
-        mock_usage.completion_tokens = 50
-
-        mock_response = MagicMock()
-        mock_response.choices = [mock_choice]
-        mock_response.usage = mock_usage
-
-        mock_client.chat.completions.create.return_value = mock_response
+        mock_message = AIMessage(
+            content="The answer is 42.", 
+            usage_metadata={"input_tokens": 100, "output_tokens": 50, "total_tokens": 150}
+        )
+        
+        mock_llm_with_tools.invoke.return_value = mock_message
 
         from app.agents.repository_agent import ResearchAgent
 
@@ -353,4 +348,4 @@ class AgentLoopTests(TestCase):
         self.assertEqual(result["prompt_tokens"], 100)
         self.assertEqual(result["completion_tokens"], 50)
         # LLM should have been called exactly once
-        self.assertEqual(mock_client.chat.completions.create.call_count, 1)
+        self.assertEqual(mock_llm_with_tools.invoke.call_count, 1)

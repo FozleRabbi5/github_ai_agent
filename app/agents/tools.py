@@ -13,7 +13,9 @@ import os
 import re
 import time
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Any
+
+from langchain_core.tools import tool
 
 from app.models import Finding, ResearchSession, ToolCall
 
@@ -83,6 +85,7 @@ def build_tools(
     # -----------------------------------------------------------------------
     # 1. list_files
     # -----------------------------------------------------------------------
+    @tool
     def list_files(path: str = ".") -> str:
         """List files and directories at the given path relative to the repository root. Returns up to 200 entries."""
         start = time.perf_counter()
@@ -120,6 +123,7 @@ def build_tools(
     # -----------------------------------------------------------------------
     # 2. read_file
     # -----------------------------------------------------------------------
+    @tool
     def read_file(path: str, start_line: int = 1, end_line: int = 500) -> str:
         """Read a file's contents from start_line to end_line (1-indexed, inclusive). Max 500 lines per call."""
         start = time.perf_counter()
@@ -155,6 +159,7 @@ def build_tools(
     # -----------------------------------------------------------------------
     # 3. search_code
     # -----------------------------------------------------------------------
+    @tool
     def search_code(query: str) -> str:
         """Search for a text pattern across all files in the repository. Returns up to 20 matches with surrounding context."""
         start = time.perf_counter()
@@ -208,6 +213,7 @@ def build_tools(
     # -----------------------------------------------------------------------
     # 4. get_file_summary
     # -----------------------------------------------------------------------
+    @tool
     def get_file_summary(path: str) -> str:
         """Get a summary of a file: size, line count, language, and for Python files, a list of classes, functions, and imports."""
         start = time.perf_counter()
@@ -269,6 +275,7 @@ def build_tools(
     # -----------------------------------------------------------------------
     # 5. save_finding
     # -----------------------------------------------------------------------
+    @tool
     def save_finding(file_path: str, note: str, finding_type: str = "observation") -> str:
         """Save an important finding or observation during research. finding_type can be: observation, pattern, issue, dependency, architecture."""
         start = time.perf_counter()
@@ -299,6 +306,7 @@ def build_tools(
     # -----------------------------------------------------------------------
     # 6. get_previous_findings
     # -----------------------------------------------------------------------
+    @tool
     def get_previous_findings(repo_url: str = "") -> str:
         """Retrieve findings from previous research sessions on this repository. Helps avoid re-exploring already-known information."""
         start = time.perf_counter()
@@ -329,6 +337,7 @@ def build_tools(
     # -----------------------------------------------------------------------
     # 7. list_past_sessions
     # -----------------------------------------------------------------------
+    @tool
     def list_past_sessions(repo_url: str = "") -> str:
         """List past research sessions for this repository, showing their questions and answers."""
         start = time.perf_counter()
