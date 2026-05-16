@@ -50,13 +50,11 @@ class ResearchService:
             status=ResearchSession.Status.RUNNING,
         )
 
-        # 4. Run the agent in a background thread
-        import threading
-        thread = threading.Thread(
-            target=self._run_agent_background,
-            args=(repo_url, str(cloned.local_path), session.id, question)
-        )
-        thread.start()
+        # 4. Run the agent synchronously so the API blocks and returns the final answer
+        self._run_agent_background(repo_url, str(cloned.local_path), session.id, question)
+        
+        # 5. Refresh from DB to get the final state
+        session.refresh_from_db()
 
         return session
 
